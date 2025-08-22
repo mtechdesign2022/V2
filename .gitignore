@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+.cache/
+.output/
+output/
+cache/
+*.sqlite
+*.db
+*.log
+*.zip
