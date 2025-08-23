@@ -1,0 +1,43 @@
+name: Update EOD Cache
+
+on:
+  schedule:
+    # Runs at 16:40 IST (11:10 UTC) Mon-Fri
+    - cron: "10 11 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  update-eod:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # allow pushing changes
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas yfinance
+
+      - name: Update EOD cache
+        env:
+          UNIVERSE_CSV: data/ind_nifty500list.csv
+          DATA_CACHE_DIR: cache/eod
+          INDEX_SYMBOL: NIFTY50
+          DAYS_BACK: 1200
+        run: |
+          python scripts/update_eod.py
+
+      - name: Commit & push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add cache/eod || true
+          git commit -m "chore: update EOD cache [skip ci]" || echo "No changes to commit"
+          git push
