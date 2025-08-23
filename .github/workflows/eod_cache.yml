@@ -14,6 +14,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Show repo tree
+        run: |
+          echo "Branch: $GITHUB_REF"
+          pwd && ls -la
+          echo "---- data ----" && ls -la data || true
+          echo "---- scripts ----" && ls -la scripts || true
+          echo "---- cache/eod (before) ----" && ls -la cache/eod || true
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -23,12 +31,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pandas yfinance
-
-      - name: Show repo tree
-        run: |
-          pwd && ls -la
-          echo "---- data ----" && ls -la data || true
-          echo "---- cache/eod (before) ----" && ls -la cache/eod || true
 
       - name: Verify Universe CSV exists & columns
         run: |
@@ -41,22 +43,48 @@ jobs:
           missing = need - set(df.columns)
           if missing:
               raise SystemExit(f"ERROR: Universe CSV missing columns: {missing}")
-          eq = df[df["Series"].astype(str).str.upper()=="EQ"]
+          eq = df[df["Series"].astype(str).str.upper()=="EQ"].copy()
+          eq["Symbol"] = eq["Symbol"].astype(str).str.strip().str.upper()
           print("Universe size (EQ only):", len(eq))
-          print(eq[["Symbol","Series"]].head(10).to_string(index=False))
+          print("First 10 symbols:", eq["Symbol"].head(10).tolist())
+          eq[["Symbol","Series"]].head(10).to_csv(sys.stdout, index=False)
           PY
 
-      - name: Quick test fetch (Reliance + NIFTY50)
+      - name: Quick test fetch (RELIANCE.NS + ^NSEI)
         run: |
           python - << 'PY'
           import yfinance as yf
-          print("RELIANCE.NS last 5d:")
-          print(yf.download("RELIANCE.NS", period="5d").tail())
-          print("\nIndex ^NSEI last 5d:")
-          print(yf.download("^NSEI", period="5d").tail())
+          print("RELIANCE.NS last 3 rows:")
+          print(yf.download("RELIANCE.NS", period="5d").tail(3))
+          print("\nIndex ^NSEI last 3 rows:")
+          print(yf.download("^NSEI", period="5d").tail(3))
           PY
 
-      - name: Run updater (writes cache/eod/*.csv)
+      - name: Probe first 5 symbols individually (write temp)
+        run: |
+          python - << 'PY'
+          import os, pandas as pd, yfinance as yf
+          df = pd.read_csv("data/ind_nifty500list.csv")
+          df = df[df["Series"].astype(str).str.upper()=="EQ"].copy()
+          syms = df["Symbol"].astype(str).str.strip().str.upper().unique().tolist()[:5]
+          os.makedirs("cache/eod", exist_ok=True)
+          ok = 0
+          for s in syms:
+            yf_sym = f"{s}.NS"
+            d = yf.download(yf_sym, period="3mo")
+            if d is None or d.empty: 
+              print(f"FAIL {s}: no data from yfinance ({yf_sym})"); 
+              continue
+            d = d.rename_axis("Date").reset_index()[["Date","Open","High","Low","Close","Volume"]]
+            d["Date"] = pd.to_datetime(d["Date"]).dt.date.astype(str)
+            out = f"cache/eod/{s}.csv"
+            d.to_csv(out, index=False)
+            print(f"OK  {s}: wrote {len(d)} rows -> {out}")
+            ok += 1
+          print(f"Probe result: {ok}/{len(syms)} wrote files")
+          PY
+
+      - name: Run full updater (writes cache/eod/*.csv)
         env:
           UNIVERSE_CSV: data/ind_nifty500list.csv
           DATA_CACHE_DIR: cache/eod
