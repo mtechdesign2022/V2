@@ -12,17 +12,14 @@ Environment:
 - DAYS_BACK (default: 1200)  # ~5 years
 Dependencies: yfinance, pandas
 """
-import os
-import sys
-import time
+import os, sys, time
 from pathlib import Path
 from datetime import datetime, timedelta
-
 import pandas as pd
 
 try:
     import yfinance as yf
-except Exception as e:
+except Exception:
     print("ERROR: yfinance not installed. Add 'yfinance' to requirements.txt.", file=sys.stderr)
     raise
 
@@ -35,12 +32,18 @@ def to_yf(sym: str) -> str:
     return f"{str(sym).strip().upper()}.NS"
 
 def index_to_yf(index_symbol: str) -> str:
-    mapping = {"NIFTY50": "^NSEI", "NIFTY_50": "^NSEI", "NIFTY500": "^CRSLDXN", "BANKNIFTY": "^NSEBANK"}
+    mapping = {
+        "NIFTY50": "^NSEI",
+        "NIFTY_50": "^NSEI",
+        "NIFTY500": "^CRSLDXN",
+        "BANKNIFTY": "^NSEBANK"
+    }
     return mapping.get(index_symbol.upper(), "^NSEI")
 
 def ensure_cols(df: pd.DataFrame) -> pd.DataFrame:
+    # yfinance returns DatetimeIndex with columns ['Open','High','Low','Close','Adj Close','Volume']
     df = df.rename_axis("Date").reset_index()
-    if "Adj Close" in df.columns and df["Close"].isna().all():
+    if "Adj Close" in df.columns and "Close" in df.columns and df["Close"].isna().all():
         df["Close"] = df["Adj Close"]
     keep = ["Date","Open","High","Low","Close","Volume"]
     df = df[keep].copy()
@@ -52,9 +55,12 @@ def merge_history(path: Path, new_df: pd.DataFrame) -> pd.DataFrame:
         try:
             old = pd.read_csv(path, parse_dates=["Date"])
             old["Date"] = pd.to_datetime(old["Date"]).dt.date.astype(str)
-            return (pd.concat([old, new_df], ignore_index=True)
-                      .drop_duplicates(subset=["Date"])
-                      .sort_values("Date"))
+            merged = (
+                pd.concat([old, new_df], ignore_index=True)
+                  .drop_duplicates(subset=["Date"])
+                  .sort_values("Date")
+            )
+            return merged
         except Exception:
             return new_df.sort_values("Date")
     return new_df.sort_values("Date")
@@ -70,7 +76,11 @@ def fetch_symbol(sym: str, period_days: int) -> pd.DataFrame | None:
     end = datetime.utcnow()
     start = end - timedelta(days=period_days)
     try:
-        hist = yf.download(yf_sym, start=start.date(), end=end.date(), progress=False, auto_adjust=False, actions=False, timeout=20)
+        hist = yf.download(
+            yf_sym,
+            start=start.date(), end=end.date(),
+            progress=False, auto_adjust=False, actions=False, timeout=20
+        )
         if hist is None or hist.empty:
             return None
         return ensure_cols(hist)
@@ -83,7 +93,11 @@ def fetch_index(index_symbol: str, period_days: int) -> pd.DataFrame | None:
     end = datetime.utcnow()
     start = end - timedelta(days=period_days)
     try:
-        hist = yf.download(yf_sym, start=start.date(), end=end.date(), progress=False, auto_adjust=False, actions=False, timeout=20)
+        hist = yf.download(
+            yf_sym,
+            start=start.date(), end=end.date(),
+            progress=False, auto_adjust=False, actions=False, timeout=20
+        )
         if hist is None or hist.empty:
             return None
         return ensure_cols(hist)
@@ -100,6 +114,7 @@ def main():
     symbols = read_universe(csv_path)
     print(f"Universe size: {len(symbols)}")
 
+    # Index first
     idx_df = fetch_index(INDEX_SYMBOL, DAYS_BACK)
     if idx_df is not None:
         idx_path = CACHE_DIR / f"{INDEX_SYMBOL}.csv"
@@ -108,6 +123,7 @@ def main():
     else:
         print("WARN: index fetch failed")
 
+    # Stocks
     for i, sym in enumerate(symbols, 1):
         df = fetch_symbol(sym, DAYS_BACK)
         if df is None:
