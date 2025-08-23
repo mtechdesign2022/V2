@@ -1,0 +1,29 @@
+{
+  "name": "NSE500_Universe_LOCAL",
+  "version": "1.0",
+  "exchange": "NSE",
+  "description": "Universe is strictly the symbols in the local CSV (Nifty 500).",
+  "source": {
+    "type": "local_csv",
+    "path": "./data/ind_nifty500list.csv",
+    "columns": {
+      "company_name": "Company Name",
+      "industry": "Industry",
+      "symbol": "Symbol",
+      "series": "Series",
+      "isin": "ISIN Code"
+    },
+    "symbol_column": "Symbol",
+    "filters": [
+      { "column": "Series", "op": "eq", "value": "EQ" }
+    ]
+  },
+  "symbol_format": "NSE:{symbol}",
+  "dedupe": true,
+  "sort": { "by": "symbol", "order": "asc" },
+  "validation": {
+    "reject_if_missing_columns": true,
+    "reject_if_empty_after_filters": true,
+    "allow_only_symbols_from_source": true
+  }
+}
