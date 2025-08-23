@@ -33,22 +33,23 @@ jobs:
           pip install pandas yfinance
 
       - name: Verify Universe CSV exists & columns
-        run: |
-          test -f data/ind_nifty500list.csv || (echo "ERROR: data/ind_nifty500list.csv not found" && exit 1)
-          python - << 'PY'
-          import pandas as pd
-          df = pd.read_csv("data/ind_nifty500list.csv")
-          print("Universe columns:", list(df.columns))
-          need = {"Company Name","Industry","Symbol","Series","ISIN Code"}
-          missing = need - set(df.columns)
-          if missing:
-              raise SystemExit(f"ERROR: Universe CSV missing columns: {missing}")
-          eq = df[df["Series"].astype(str).str.upper()=="EQ"].copy()
-          eq["Symbol"] = eq["Symbol"].astype(str).str.strip().str.upper()
-          print("Universe size (EQ only):", len(eq))
-          print("First 10 symbols:", eq["Symbol"].head(10).tolist())
-          eq[["Symbol","Series"]].head(10).to_csv(sys.stdout, index=False)
-          PY
+  run: |
+    test -f data/ind_nifty500list.csv || (echo "ERROR: data/ind_nifty500list.csv not found" && exit 1)
+    python - << 'PY'
+    import sys
+    import pandas as pd
+    df = pd.read_csv("data/ind_nifty500list.csv")
+    print("Universe columns:", list(df.columns))
+    need = {"Company Name","Industry","Symbol","Series","ISIN Code"}
+    missing = need - set(df.columns)
+    if missing:
+        raise SystemExit(f"ERROR: Universe CSV missing columns: {missing}")
+    eq = df[df["Series"].astype(str).str.upper()=="EQ"].copy()
+    eq["Symbol"] = eq["Symbol"].astype(str).str.strip().str.upper()
+    print("Universe size (EQ only):", len(eq))
+    print("First 10 symbols:", eq["Symbol"].head(10).tolist())
+    eq[["Symbol","Series"]].head(10).to_csv(sys.stdout, index=False)
+    PY
 
       - name: Quick test fetch (RELIANCE.NS + ^NSEI)
         run: |
