@@ -1,6 +1,4 @@
 # Security & Access
-
-- Private repository; access by invitation only.
-- Production secrets are stored in environment variables and not committed.
-- All API access (if enabled) must use OAuth2 + JWT, with IP allowlisting and rate limiting.
-- Do not share build artifacts or credentials. Report incidents to <email>.
+- Private intent even if repo is public; do not share credentials.
+- Secrets (APP_PASSWORD, etc.) must be stored in Streamlit Cloud Secrets.
+- Do not commit API keys or private data.
