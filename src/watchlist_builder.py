@@ -22,18 +22,17 @@ class SignalParams:
     stop_min_buffer_pct: float = config.STOP_MIN_BUFFER_PCT
 
 def build_watchlist(symbols: List[str], fundamentals_df: pd.DataFrame, cache_dir: str, index_symbol: str) -> pd.DataFrame:
-    # Load index
     idx_df = safe_read_eod(cache_dir, index_symbol)
     if idx_df is None or len(idx_df) < 220:
         raise RuntimeError(f"Index EOD not found or insufficient: {index_symbol}")
     idx_close = idx_df[["Date","Close"]].set_index("Date")["Close"]
+
     rows = []
     for sym in symbols:
         df = safe_read_eod(cache_dir, sym)
         if df is None or len(df) < 200:
             continue
-        reclaim = is_reclaim_setup(df, lookback_days=config.RECLAIM_LOOKBACK_DAYS, recent_window=config.RECLAIM_RECENT_WINDOW_DAYS).iloc[-1]
-        if not reclaim:
+        if not is_reclaim_setup(df, lookback_days=config.RECLAIM_LOOKBACK_DAYS, recent_window=config.RECLAIM_RECENT_WINDOW_DAYS).iloc[-1]:
             continue
         rsi_ok = rising_rsi_band(df, lower=20, upper=38, length=14).iloc[-1]
         vol_ok = bool(volume_thrust(df, mult=config.VOLUME_THRUST_MULTIPLIER).iloc[-1] or five_day_thrust(df, ratio=config.FIVE_DAY_THRUST_RATIO).iloc[-1])
@@ -41,15 +40,11 @@ def build_watchlist(symbols: List[str], fundamentals_df: pd.DataFrame, cache_dir
         rs_ok = rs_20d_high(rs_series, lookback=config.RS_LOOKBACK_DAYS).reindex(df["Date"]).fillna(False).iloc[-1]
 
         high = df["High"].iloc[-1]
-        low = df["Low"].iloc[-1]
-        # rolling low for stop reference
         rolling_low = df["Low"].rolling(config.RECLAIM_LOOKBACK_DAYS, min_periods=config.RECLAIM_LOOKBACK_DAYS).min().iloc[-1]
-
         entry = round(high * (1 + config.ENTRY_BUFFER_PCT/100), 2)
         _atr = atr(df, length=14).iloc[-1]
-        stop1 = rolling_low - config.STOP_ATR_MULTIPLIER * _atr
-        stop2 = rolling_low * (1 - config.STOP_MIN_BUFFER_PCT/100)
-        stop = round(min(stop1, stop2), 2)
+        stop = round(min(rolling_low - config.STOP_ATR_MULTIPLIER * _atr,
+                         rolling_low * (1 - config.STOP_MIN_BUFFER_PCT/100)), 2)
         risk_per_share = max(0.01, entry - stop)
         r1 = round(entry + risk_per_share * 1.0, 2)
         r2 = round(entry + risk_per_share * 2.0, 2)
@@ -75,7 +70,7 @@ def build_watchlist(symbols: List[str], fundamentals_df: pd.DataFrame, cache_dir
             "RSI_Rising_20_38": rsi_ok,
             "Fund_DE_le_1_5": fchecks.get("de_le_1_5"),
             "Fund_ICR_ge_2_5": fchecks.get("icr_ge_2_5"),
-            "Fund_Pledge_le_20": fchecks.get("pledge_le_20"),
+            "Fund_Pledge_le_20": fchecks.get("promoter_pledge_pct") if isinstance(fchecks, dict) and "promoter_pledge_pct" in fchecks else fchecks.get("pledge_le_20"),
             "Fund_QoQ_Pos_1of3": fchecks.get("qoq_rev_or_eps_ge_1_of_3"),
             "Fundamentals": fchecks.get("status"),
         })
