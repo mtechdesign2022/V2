@@ -30,9 +30,7 @@ def relative_strength_ratio(stock_close: pd.Series, index_close: pd.Series) -> p
 def is_reclaim_setup(df: pd.DataFrame, lookback_days: int = 126, recent_window: int = 10) -> pd.Series:
     rolling_low = df["Low"].rolling(lookback_days, min_periods=lookback_days).min()
     is_new_low = df["Low"] == rolling_low
-    # index of recent new low
     last_low_value = rolling_low.where(is_new_low).ffill()
-    # approximate "age" since last new low
     grp = (is_new_low != is_new_low.shift()).cumsum()
     low_age = (~is_new_low).groupby(grp).cumcount().reindex(df.index).fillna(method="ffill")
     undercut = (df["Low"] >= last_low_value * 0.98) & (df["Low"] <= last_low_value * 1.00)
