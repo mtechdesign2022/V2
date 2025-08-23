@@ -4,7 +4,10 @@ __pycache__/
 .cache/
 .output/
 output/
-cache/
+# Allow committing cache/eod to store EOD history
+cache/*
+!cache/eod/
+!cache/eod/**
 *.sqlite
 *.db
 *.log
