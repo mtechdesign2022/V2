@@ -3,7 +3,8 @@ name: Update EOD Cache (debug)
 on:
   workflow_dispatch:
   schedule:
-    - cron: "10 11 * * 1-5"   # 16:40 IST, Mon–Fri
+    # 16:40 IST (11:10 UTC) Mon–Fri
+    - cron: "10 11 * * 1-5"
 
 jobs:
   update-eod:
@@ -33,23 +34,24 @@ jobs:
           pip install pandas yfinance
 
       - name: Verify Universe CSV exists & columns
-  run: |
-    test -f data/ind_nifty500list.csv || (echo "ERROR: data/ind_nifty500list.csv not found" && exit 1)
-    python - << 'PY'
-    import sys
-    import pandas as pd
-    df = pd.read_csv("data/ind_nifty500list.csv")
-    print("Universe columns:", list(df.columns))
-    need = {"Company Name","Industry","Symbol","Series","ISIN Code"}
-    missing = need - set(df.columns)
-    if missing:
-        raise SystemExit(f"ERROR: Universe CSV missing columns: {missing}")
-    eq = df[df["Series"].astype(str).str.upper()=="EQ"].copy()
-    eq["Symbol"] = eq["Symbol"].astype(str).str.strip().str.upper()
-    print("Universe size (EQ only):", len(eq))
-    print("First 10 symbols:", eq["Symbol"].head(10).tolist())
-    eq[["Symbol","Series"]].head(10).to_csv(sys.stdout, index=False)
-    PY
+        run: |
+          test -f data/ind_nifty500list.csv || (echo "ERROR: data/ind_nifty500list.csv not found" && exit 1)
+          python - << 'PY'
+          import sys
+          import pandas as pd
+          df = pd.read_csv("data/ind_nifty500list.csv")
+          print("Universe columns:", list(df.columns))
+          need = {"Company Name","Industry","Symbol","Series","ISIN Code"}
+          missing = need - set(df.columns)
+          if missing:
+              raise SystemExit(f"ERROR: Universe CSV missing columns: {missing}")
+          eq = df[df["Series"].astype(str).str.upper()=="EQ"].copy()
+          eq["Symbol"] = eq["Symbol"].astype(str).str.strip().str.upper()
+          print("Universe size (EQ only):", len(eq))
+          print("First 10 symbols:", eq["Symbol"].head(10).tolist())
+          # Optional pretty print; safe now because we imported sys
+          eq[["Symbol","Series"]].head(10).to_csv(sys.stdout, index=False)
+          PY
 
       - name: Quick test fetch (RELIANCE.NS + ^NSEI)
         run: |
@@ -73,8 +75,8 @@ jobs:
           for s in syms:
             yf_sym = f"{s}.NS"
             d = yf.download(yf_sym, period="3mo")
-            if d is None or d.empty: 
-              print(f"FAIL {s}: no data from yfinance ({yf_sym})"); 
+            if d is None or d.empty:
+              print(f"FAIL {s}: no data from yfinance ({yf_sym})")
               continue
             d = d.rename_axis("Date").reset_index()[["Date","Open","High","Low","Close","Volume"]]
             d["Date"] = pd.to_datetime(d["Date"]).dt.date.astype(str)
