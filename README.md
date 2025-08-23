@@ -7,3 +7,11 @@ This repository contains internal tooling for proprietary research (V2.3). Acces
    ```bash
    python -m venv .venv && source .venv/bin/activate
    pip install -r requirements.txt
+
+---
+
+### `LICENSE.txt`
+```text
+Copyright (c) 2025 <mtechdesign2022>. All rights reserved.
+This software and its source code are proprietary and confidential.
+Unauthorized copying, modification, distribution, or use is strictly prohibited.
