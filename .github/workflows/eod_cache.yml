@@ -10,7 +10,7 @@ jobs:
   update-eod:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # allow pushing changes
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,10 +34,17 @@ jobs:
         run: |
           python scripts/update_eod.py
 
+      - name: List generated files
+        run: |
+          echo "Listing cache/eod:"
+          find cache/eod -maxdepth 1 -type f -name "*.csv" | wc -l
+          find cache/eod -maxdepth 1 -type f -name "*.csv" | head -20
+          ls -la cache/eod || true
+
       - name: Commit & push changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add cache/eod || true
+          git add -f cache/eod/*.csv || true
           git commit -m "chore: update EOD cache [skip ci]" || echo "No changes to commit"
           git push
