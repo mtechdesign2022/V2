@@ -34,9 +34,6 @@ def fundamentals_pass(row: pd.Series, allow_unknown: bool = False) -> Dict[str,b
     if any(v is False for v in checks.values()):
         status = "FAIL"
     else:
-        if all(v is True for v in checks.values()):
-            status = "PASS"
-        else:
-            status = "UNKNOWN" if allow_unknown else "FAIL"
+        status = "PASS" if all(v is True for v in checks.values()) else ("UNKNOWN" if allow_unknown else "FAIL")
     checks["status"] = status
     return checks
