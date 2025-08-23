@@ -1,10 +1,10 @@
-name: Update EOD Cache
+name: Update EOD Cache (debug)
 
 on:
-  schedule:
-    # Runs at 16:40 IST (11:10 UTC) Mon-Fri
-    - cron: "10 11 * * 1-5"
   workflow_dispatch:
+  schedule:
+    # ~16:40 IST (11:10 UTC) Mon–Fri
+    - cron: "10 11 * * 1-5"
 
 jobs:
   update-eod:
@@ -14,6 +14,28 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Show repo tree (top level)
+        run: |
+          pwd && ls -la
+          echo "---- data ----" && ls -la data || true
+          echo "---- cache/eod (before) ----" && ls -la cache/eod || true
+
+      - name: Verify Universe CSV exists & columns
+        run: |
+          test -f data/ind_nifty500list.csv || (echo "ERROR: data/ind_nifty500list.csv not found" && exit 1)
+          python - << 'PY'
+          import pandas as pd
+          df = pd.read_csv("data/ind_nifty500list.csv")
+          print("Universe columns:", list(df.columns))
+          need = {"Company Name","Industry","Symbol","Series","ISIN Code"}
+          missing = need - set(df.columns)
+          if missing:
+              raise SystemExit(f"ERROR: Universe CSV missing columns: {missing}")
+          eq = df[df["Series"].astype(str).str.upper()=="EQ"]
+          print("Universe size (EQ only):", len(eq))
+          print(eq[["Symbol","Series"]].head(10).to_string(index=False))
+          PY
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -25,7 +47,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas yfinance
 
-      - name: Update EOD cache
+      - name: Quick test fetch (Reliance + NIFTY50)
+        run: |
+          python - << 'PY'
+          import yfinance as yf, pandas as pd
+          print("RELIANCE.NS last 5d:")
+          print(yf.download("RELIANCE.NS", period="5d").tail())
+          print("\nIndex ^NSEI last 5d:")
+          print(yf.download("^NSEI", period="5d").tail())
+          PY
+
+      - name: Run updater (writes cache/eod/*.csv)
         env:
           UNIVERSE_CSV: data/ind_nifty500list.csv
           DATA_CACHE_DIR: cache/eod
@@ -34,12 +66,22 @@ jobs:
         run: |
           python scripts/update_eod.py
 
-      - name: List generated files
+      - name: List generated files (after)
+        id: list_files
         run: |
-          echo "Listing cache/eod:"
-          find cache/eod -maxdepth 1 -type f -name "*.csv" | wc -l
-          find cache/eod -maxdepth 1 -type f -name "*.csv" | head -20
-          ls -la cache/eod || true
+          echo "---- cache/eod (after) ----"
+          mkdir -p cache/eod
+          count=$(find cache/eod -maxdepth 1 -type f -name "*.csv" | wc -l)
+          echo "CSV_COUNT=$count" >> $GITHUB_OUTPUT
+          find cache/eod -maxdepth 1 -type f -name "*.csv" | head -30
+          # show first lines of index if present
+          test -f cache/eod/NIFTY50.csv && head -5 cache/eod/NIFTY50.csv || true
+
+      - name: Fail if no CSVs were produced
+        if: steps.list_files.outputs.CSV_COUNT == '0'
+        run: |
+          echo "ERROR: No CSVs were produced in cache/eod/"
+          exit 1
 
       - name: Commit & push changes
         run: |
