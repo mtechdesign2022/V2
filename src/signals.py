@@ -57,6 +57,28 @@ def rising_rsi_band(series: pd.Series, lower: int = 20, upper: int = 38) -> bool
     in_band = last3.between(lower, upper).all()
     return bool(rising and in_band)
 
+# ---- Extra conditions ----
+def five_day_thrust(df: pd.DataFrame) -> bool:
+    """
+    Returns True if today's volume is > 1.5x avg of last 5 days
+    AND today's close > yesterday's close.
+    """
+    if len(df) < 6:
+        return False
+    vol = _to_num(df["Volume"])
+    close = _to_num(df["Close"])
+    avg5 = vol.iloc[-6:-1].mean()
+    return bool(vol.iloc[-1] > 1.5 * avg5 and close.iloc[-1] > close.iloc[-2])
+
+def rs_20d_high(sym_close: pd.Series, idx_close: pd.Series) -> bool:
+    """
+    Returns True if relative strength ratio is at a 20-day high.
+    """
+    rs = relative_strength_ratio(sym_close, idx_close)
+    if len(rs) < 20:
+        return False
+    return bool(rs.iloc[-1] >= rs.rolling(20, min_periods=20).max().iloc[-1])
+
 # ---- False breakdown reclaim ----
 def is_reclaim_setup(
     df: pd.DataFrame,
@@ -69,15 +91,6 @@ def is_reclaim_setup(
     A pragmatic 'false breakdown reclaim' approximation:
       • Yesterday closed below the rolling pivot (recent lowest close or MA),
       • Today closed back above that level and above yesterday's high.
-
-    Parameters
-    ----------
-    lookback_days : int, optional
-        Legacy alias for pivot_lookback.
-    pivot_lookback : int
-        Window for recent lowest close.
-    ma_len : int
-        Moving average length (default 50).
     """
     if lookback_days is not None:
         try:
