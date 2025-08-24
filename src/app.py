@@ -5,27 +5,91 @@ _ROOT_DIR = os.path.dirname(_PKG_DIR)         # /mount/src/v2
 if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
 # -----------------------------------------------
-import os
+
 from datetime import datetime
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
+# Local imports
 from src import config
 from src.io_utils import load_universe_symbols, safe_read_eod
 from src.watchlist_builder import build_watchlist
 from src.fundamentals import load_fundamentals
 from src.regime import market_regime
 
+# -------------------- App setup --------------------
 load_dotenv()
 st.set_page_config(page_title="V2.3 Watchlist (Universe-only)", layout="wide")
 
-# Access gate
-password = st.text_input("Enter app password", type="password")
-if password != config.APP_PASSWORD:
+# ---------- Password helpers (login gate) ----------
+def _expected_password() -> str:
+    """
+    Order of precedence:
+      1) st.secrets["APP_PASSWORD"]
+      2) env var APP_PASSWORD
+      3) config.APP_PASSWORD (if present)
+    """
+    # 1) Streamlit secrets
+    try:
+        if "APP_PASSWORD" in st.secrets:
+            return str(st.secrets["APP_PASSWORD"])
+    except Exception:
+        pass
+    # 2) Environment
+    env_pwd = os.getenv("APP_PASSWORD")
+    if env_pwd:
+        return env_pwd
+    # 3) config fallback
+    return str(getattr(config, "APP_PASSWORD", ""))
+
+def _login_gate():
+    if "auth_ok" not in st.session_state:
+        st.session_state.auth_ok = False
+
+    if st.session_state.auth_ok:
+        return True
+
+    st.title("V2.3 – False Breakdown Reclaim Scanner (Universe-only)")
+    st.subheader("Login")
+    pwd = st.text_input("Enter app password", type="password", key="pwd", help="Press Enter or click Login")
+
+    col1, col2 = st.columns([1, 6])
+    with col1:
+        submit = st.button("Login", type="primary")
+
+    # Enter key also triggers a rerun; treat non-empty input as an attempt
+    attempted = submit or (pwd != "")
+
+    if attempted:
+        if pwd == _expected_password():
+            st.session_state.auth_ok = True
+            st.success("Access granted ✅")
+            st.rerun()
+        else:
+            st.error("Incorrect password ❌")
+
+    # Stop rendering the rest of the app until authenticated
     st.stop()
 
+# Gate the app
+_login_gate()
+
+# -------------------- Main App --------------------
 st.title("V2.3 – False Breakdown Reclaim Scanner (Universe-only)")
+
+# Sidebar: logout + paths
+with st.sidebar:
+    st.header("Session")
+    if st.button("Logout"):
+        st.session_state.clear()
+        st.rerun()
+
+st.sidebar.header("Paths & Settings")
+st.sidebar.write(f"Universe CSV: `{config.UNIVERSE_CSV}`")
+st.sidebar.write(f"EOD cache: `{config.DATA_CACHE_DIR}`")
+st.sidebar.write(f"Fundamentals CSV: `{config.FUNDAMENTALS_CSV}`")
+st.sidebar.write(f"Index symbol: `{config.INDEX_SYMBOL}`")
 
 # Universe
 try:
@@ -33,13 +97,6 @@ try:
 except Exception as e:
     st.error(f"Universe load failed: {e}")
     st.stop()
-
-# Sidebar
-st.sidebar.header("Paths & Settings")
-st.sidebar.write(f"Universe CSV: `{config.UNIVERSE_CSV}`")
-st.sidebar.write(f"EOD cache: `{config.DATA_CACHE_DIR}`")
-st.sidebar.write(f"Fundamentals CSV: `{config.FUNDAMENTALS_CSV}`")
-st.sidebar.write(f"Index symbol: `{config.INDEX_SYMBOL}`")
 
 subset = st.sidebar.multiselect("Limit to symbols", options=universe, default=[])
 symbols = subset if subset else universe
