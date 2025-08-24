@@ -1,125 +1,225 @@
+# src/signals.py
+from __future__ import annotations
+
 import numpy as np
 import pandas as pd
 
-# ---- Helpers ----
-def _to_num(series: pd.Series) -> pd.Series:
-    """Convert series to numeric, coerce errors, drop NaNs later."""
-    return pd.to_numeric(series, errors="coerce")
+# -----------------------------------------------------------------------------
+# Helpers (defensive: coerce strings to numbers, handle short data gracefully)
+# -----------------------------------------------------------------------------
 
-# ---- Core indicators ----
-def sma(series: pd.Series, length: int) -> pd.Series:
-    """Simple moving average."""
-    s = _to_num(series)
-    return s.rolling(length, min_periods=length).mean()
+REQ_COLS = ["Open", "High", "Low", "Close", "Volume"]
 
-def atr(df: pd.DataFrame, length: int = 14) -> pd.Series:
-    """Average True Range."""
-    high = _to_num(df["High"])
-    low = _to_num(df["Low"])
-    close = _to_num(df["Close"])
-    high_low = high - low
-    high_close = (high - close.shift()).abs()
-    low_close = (low - close.shift()).abs()
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    return tr.rolling(length, min_periods=length).mean()
 
-def rsi(series: pd.Series, length: int = 14) -> pd.Series:
-    """Relative Strength Index."""
-    s = _to_num(series)
-    delta = s.diff()
-    up = delta.clip(lower=0)
-    down = -delta.clip(upper=0)
-    avg_gain = up.rolling(length, min_periods=length).mean()
-    avg_loss = down.rolling(length, min_periods=length).mean()
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi.fillna(method="bfill")
+def _coerce_numeric(series: pd.Series) -> pd.Series:
+    """Coerce a Series (possibly containing strings) to numeric floats."""
+    s = pd.to_numeric(series, errors="coerce")
+    # If all NaN, just return as-is to let caller decide
+    return s
 
-def volume_thrust(df: pd.DataFrame, lookback: int = 5, mult: float = 1.3) -> bool:
-    """True if last day's volume > mult × avg of previous `lookback` days."""
-    vol = _to_num(df["Volume"])
-    if len(vol) < lookback + 1:
-        return False
-    recent_avg = vol.iloc[-(lookback+1):-1].mean()
-    return bool(vol.iloc[-1] > mult * recent_avg)
 
-def relative_strength_ratio(sym_close: pd.Series, idx_close: pd.Series) -> pd.Series:
-    """RS ratio = symbol close / index close."""
-    return _to_num(sym_close) / _to_num(idx_close)
+def _ensure_ohlcv_numeric(df: pd.DataFrame) -> pd.DataFrame:
+    """Return a copy with OHLCV coerced to numeric; keep other cols untouched."""
+    out = df.copy()
+    for c in REQ_COLS:
+        if c in out.columns:
+            out[c] = _coerce_numeric(out[c])
+    return out
 
-def rising_rsi_band(series: pd.Series, lower: int = 20, upper: int = 38) -> bool:
-    """Last 3 RSIs are rising and inside [lower, upper] band."""
-    r = rsi(series)
-    if len(r) < 3:
-        return False
-    last3 = r.iloc[-3:]
-    rising = all(last3[i] < last3[i+1] for i in range(len(last3)-1))
-    in_band = last3.between(lower, upper).all()
-    return bool(rising and in_band)
 
-# ---- Extra conditions ----
-def five_day_thrust(df: pd.DataFrame) -> bool:
-    """
-    Returns True if today's volume is > 1.5x avg of last 5 days
-    AND today's close > yesterday's close.
-    """
-    if len(df) < 6:
-        return False
-    vol = _to_num(df["Volume"])
-    close = _to_num(df["Close"])
-    avg5 = vol.iloc[-6:-1].mean()
-    return bool(vol.iloc[-1] > 1.5 * avg5 and close.iloc[-1] > close.iloc[-2])
+def _has_cols(df: pd.DataFrame, cols: list[str]) -> bool:
+    return all(c in df.columns for c in cols)
 
-def rs_20d_high(sym_close: pd.Series, idx_close: pd.Series) -> bool:
-    """
-    Returns True if relative strength ratio is at a 20-day high.
-    """
-    rs = relative_strength_ratio(sym_close, idx_close)
-    if len(rs) < 20:
-        return False
-    return bool(rs.iloc[-1] >= rs.rolling(20, min_periods=20).max().iloc[-1])
 
-# ---- False breakdown reclaim ----
-def is_reclaim_setup(
-    df: pd.DataFrame,
-    lookback_days: int | None = None,   # legacy alias
-    pivot_lookback: int = 20,
-    ma_len: int = 50,
-    **_
-) -> bool:
-    """
-    A pragmatic 'false breakdown reclaim' approximation:
-      • Yesterday closed below the rolling pivot (recent lowest close or MA),
-      • Today closed back above that level and above yesterday's high.
-    """
-    if lookback_days is not None:
-        try:
-            pivot_lookback = int(lookback_days)
-        except Exception:
-            pass
-
-    if not {"High", "Low", "Close"}.issubset(df.columns):
-        return False
-
-    c = _to_num(df["Close"])
-    h = _to_num(df["High"])
-
-    if len(df) < max(pivot_lookback, ma_len) + 2:
-        return False
-
+def _enough(series_or_df, n: int) -> bool:
     try:
-        pivot = c.rolling(pivot_lookback, min_periods=pivot_lookback).min()
-        ma50 = sma(c, ma_len)
-        level = np.maximum(pivot, ma50)
-
-        y_close = float(c.iloc[-2])
-        t_close = float(c.iloc[-1])
-        y_high = float(h.iloc[-2])
-        lv_y = float(level.iloc[-2])
-
-        broke_below = y_close < lv_y
-        reclaimed = (t_close > lv_y) and (t_close > y_high)
-
-        return bool(broke_below and reclaimed)
+        return len(series_or_df) >= n
     except Exception:
         return False
+
+
+# -----------------------------------------------------------------------------
+# Core indicators
+# -----------------------------------------------------------------------------
+
+def sma(series: pd.Series, length: int) -> pd.Series:
+    s = _coerce_numeric(series)
+    return s.rolling(length, min_periods=length).mean()
+
+
+def rsi(series: pd.Series, length: int = 14) -> pd.Series:
+    s = _coerce_numeric(series)
+    delta = s.diff()
+    gain = delta.where(delta > 0, 0.0)
+    loss = -delta.where(delta < 0, 0.0)
+    avg_gain = gain.rolling(length, min_periods=length).mean()
+    avg_loss = loss.rolling(length, min_periods=length).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    out = 100 - (100 / (1 + rs))
+    # Avoid FutureWarning: use .bfill() instead of fillna(method="bfill")
+    return out.bfill()
+
+
+def atr(df: pd.DataFrame, length: int = 14) -> pd.Series:
+    if not _has_cols(df, ["High", "Low", "Close"]):
+        return pd.Series(dtype=float)
+    dfn = _ensure_ohlcv_numeric(df)
+    high = dfn["High"]
+    low = dfn["Low"]
+    close = dfn["Close"]
+    prev_close = close.shift(1)
+
+    tr1 = high - low
+    tr2 = (high - prev_close).abs()
+    tr3 = (low - prev_close).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    return tr.rolling(length, min_periods=length).mean()
+
+
+# -----------------------------------------------------------------------------
+# Relative Strength (vs index)
+# -----------------------------------------------------------------------------
+
+def _rs_series(sym_close: pd.Series, idx_close: pd.Series) -> pd.Series:
+    s = _coerce_numeric(sym_close)
+    i = _coerce_numeric(idx_close)
+    rs = s / i.replace(0, np.nan)
+    return rs
+
+
+def relative_strength_ratio(sym_close: pd.Series, idx_close: pd.Series) -> pd.Series:
+    """
+    Raw relative strength line (symbol / index).
+    """
+    return _rs_series(sym_close, idx_close)
+
+
+def rs_20d_high(sym_close: pd.Series, idx_close: pd.Series, window: int = 20) -> bool:
+    """
+    True if today's RS equals its rolling 20-day max.
+    """
+    rs = _rs_series(sym_close, idx_close)
+    if not _enough(rs.dropna(), window):
+        return False
+    rs_max = rs.rolling(window, min_periods=window).max()
+    return bool(np.isclose(rs.iloc[-1], rs_max.iloc[-1], equal_nan=False))
+
+
+# -----------------------------------------------------------------------------
+# Pattern/Filter style functions used by the scanner
+# -----------------------------------------------------------------------------
+
+def is_reclaim_setup(
+    df: pd.DataFrame,
+    lookback_days: int = 5,
+    support_window: int = 20,
+    require_green: bool = True,
+) -> bool:
+    """
+    A simple 'false-breakdown then reclaim' heuristic:
+      - Define support as the rolling `support_window`-day MIN of Close (shifted by 1).
+      - If within the last `lookback_days` the Close dipped below support,
+      - and today Close is back ABOVE support (i.e., reclaimed),
+      - optionally also require today to be a green candle (Close > Open).
+
+    Returns:
+      bool for the latest bar.
+    """
+    if not _has_cols(df, ["Open", "Close"]):
+        return False
+    if not _enough(df, max(lookback_days + support_window, support_window + 1)):
+        return False
+
+    dfn = _ensure_ohlcv_numeric(df)
+    close = dfn["Close"]
+    open_ = dfn["Open"]
+
+    # Prior support (shifted so the current day doesn't influence support level)
+    prior_support = close.rolling(support_window, min_periods=support_window).min().shift(1)
+
+    # Lookback window (including today for reclaim check)
+    recent = pd.DataFrame({"Close": close, "Support": prior_support}).tail(lookback_days + 1)
+
+    # Any breakdown in the last lookback_days BEFORE today?
+    breakdown = (recent["Close"].iloc[:-1] < recent["Support"].iloc[:-1]).any()
+
+    # Reclaim today: Close > prior support
+    reclaim_today = recent["Close"].iloc[-1] > (recent["Support"].iloc[-1] if pd.notna(recent["Support"].iloc[-1]) else -np.inf)
+
+    green_today = True if not require_green else bool(close.iloc[-1] > open_.iloc[-1])
+
+    return bool(breakdown and reclaim_today and green_today)
+
+
+def volume_thrust(df: pd.DataFrame, lookback: int = 20, multiple: float = 1.5) -> bool:
+    """
+    Today's Volume > multiple * average Volume of the previous `lookback` days.
+    """
+    if not _has_cols(df, ["Volume"]):
+        return False
+    dfn = _ensure_ohlcv_numeric(df)
+    vol = dfn["Volume"]
+    if not _enough(vol.dropna(), lookback + 1):
+        return False
+    prior_avg = vol.iloc[-(lookback + 1):-1].mean()
+    return bool(vol.iloc[-1] > multiple * prior_avg)
+
+
+def five_day_thrust(df: pd.DataFrame, short: int = 5, long: int = 50, ratio_min: float = 1.2) -> bool:
+    """
+    5-day avg volume vs 50-day avg volume. True if (5d / 50d) >= ratio_min.
+    """
+    if not _has_cols(df, ["Volume"]):
+        return False
+    dfn = _ensure_ohlcv_numeric(df)
+    vol = dfn["Volume"]
+    if not _enough(vol.dropna(), max(short, long)):
+        return False
+    v5 = vol.rolling(short, min_periods=short).mean().iloc[-1]
+    v50 = vol.rolling(long, min_periods=long).mean().iloc[-1]
+    if pd.isna(v5) or pd.isna(v50) or v50 == 0:
+        return False
+    return bool((v5 / v50) >= ratio_min)
+
+
+def rising_rsi_band(
+    close: pd.Series,
+    low: float = 20.0,
+    high: float = 38.0,
+    lookback: int = 10,
+    rsi_len: int = 14,
+) -> bool:
+    """
+    RSI is inside [low, high] and generally rising over the last `lookback` bars.
+    """
+    r = rsi(close, rsi_len)
+    r_valid = r.dropna()
+    if not _enough(r_valid, lookback):
+        return False
+
+    r_tail = r.tail(lookback)
+    if r_tail.isna().any():
+        return False
+
+    in_band = (r_tail.iloc[-1] >= low) and (r_tail.iloc[-1] <= high)
+
+    # Rising: last value >= median of the last `lookback` and above its min
+    rising = (r_tail.iloc[-1] >= r_tail.median()) and (r_tail.iloc[-1] > r_tail.min())
+    return bool(in_band and rising)
+
+
+# -----------------------------------------------------------------------------
+# Exports (keep names consistent with imports in the app)
+# -----------------------------------------------------------------------------
+
+__all__ = [
+    "sma",
+    "rsi",
+    "atr",
+    "relative_strength_ratio",
+    "rs_20d_high",
+    "is_reclaim_setup",
+    "volume_thrust",
+    "five_day_thrust",
+    "rising_rsi_band",
+]
