@@ -1,3 +1,10 @@
+# --- bootstrap: make project root importable ---
+import os, sys
+_PKG_DIR = os.path.dirname(__file__)          # /mount/src/v2/src
+_ROOT_DIR = os.path.dirname(_PKG_DIR)         # /mount/src/v2
+if _ROOT_DIR not in sys.path:
+    sys.path.insert(0, _ROOT_DIR)
+# -----------------------------------------------
 import os
 from datetime import datetime
 import pandas as pd
